@@ -1,0 +1,11 @@
+C:\Users\timhe\Downloads\Living.Room\NowPlayingTool\bin\Release\NowPlayingTool.exe
+C:\Users\timhe\Downloads\Living.Room\NowPlayingTool\bin\Release\NowPlayingTool.dll
+C:\Users\timhe\Downloads\Living.Room\NowPlayingTool\bin\Release\NowPlayingTool.deps.json
+C:\Users\timhe\Downloads\Living.Room\NowPlayingTool\bin\Release\NowPlayingTool.runtimeconfig.json
+C:\Users\timhe\Downloads\Living.Room\NowPlayingTool\bin\Release\NowPlayingTool.pdb
+C:\Users\timhe\Downloads\Living.Room\NowPlayingTool\bin\Release\Microsoft.Win32.SystemEvents.dll
+C:\Users\timhe\Downloads\Living.Room\NowPlayingTool\bin\Release\Newtonsoft.Json.dll
+C:\Users\timhe\Downloads\Living.Room\NowPlayingTool\bin\Release\NPSMLib.dll
+C:\Users\timhe\Downloads\Living.Room\NowPlayingTool\bin\Release\System.Drawing.Common.dll
+C:\Users\timhe\Downloads\Living.Room\NowPlayingTool\bin\Release\System.Private.Windows.Core.dll
+C:\Users\timhe\Downloads\Living.Room\NowPlayingTool\bin\Release\runtimes\win\lib\net9.0\Microsoft.Win32.SystemEvents.dll

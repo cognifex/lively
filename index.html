@@ -1,0 +1,2097 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Isometric Room</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
+    <link rel="stylesheet" href="styles/style.css" />
+    <style>
+      #ui-hover-zone {
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 0; /* hover disabled */
+        height: 0;
+        z-index: 101;
+        display: none;
+      }
+      #ui-container {
+        position: fixed;
+        top: 10px;
+        left: 10px;
+        background: rgba(0, 0, 0, 0.75);
+        padding: 10px;
+        border-radius: 8px;
+        color: white;
+        font-family: sans-serif;
+        font-size: 14px;
+        z-index: 100;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        width: 220px;
+        /* Show by default (hover disabled) */
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+        transition: opacity 0.3s, visibility 0.3s;
+      }
+      /* Hover behavior removed */
+      /* Also keep the panel open/interactive while it is hovered (via JS class) */
+      #ui-container.open {
+        opacity: 1;
+        visibility: visible;
+        pointer-events: auto;
+      }
+      #ui-container h3 {
+        margin: 0 0 10px 0;
+        padding: 0;
+        text-align: center;
+        border-bottom: 1px solid #555;
+        padding-bottom: 5px;
+      }
+      #ui-container label {
+        display: block;
+        margin-bottom: 5px;
+      }
+      #ui-container input[type="file"],
+      #ui-container button,
+      #ui-container select {
+        width: 100%;
+        box-sizing: border-box;
+      }
+       #ui-container button {
+        padding: 8px;
+        background: #444;
+        color: white;
+        border: 1px solid #666;
+        border-radius: 5px;
+        cursor: pointer;
+       }
+       #ui-container button:hover {
+        background: #555;
+       }
+       .ui-section {
+        padding-top: 10px;
+        border-top: 1px solid #555;
+       }
+       .ui-flex-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+       }
+       .window-controls {
+        display: flex;
+        gap: 5px;
+       }
+       .window-controls button {
+        flex-grow: 1;
+      }
+    </style>
+  </head>
+
+  <body style="background: transparent; overflow: hidden;">
+    <script>
+      // Early global error hooks to capture parse/runtime errors before UI init
+      window.addEventListener('error', (e) => { try { window.electronAPI?.log?.('error', 'global.error', String(e?.message||e), 'at', e?.filename||'', e?.lineno||'', e?.colno||''); } catch {} });
+      window.addEventListener('unhandledrejection', (e) => { try { window.electronAPI?.log?.('error', 'global.unhandledrejection', String(e?.reason||e)); } catch {} });
+    </script>
+    <!-- Picking HUD (bottom-left) -->
+    <style>
+      #pickHud { position: fixed; left: 10px; bottom: 10px; z-index: 200; display: flex; gap: 6px; align-items: center; }
+      .hudBadge { background: rgba(0,0,0,0.5); color: #ddd; font: 12px/1.2 sans-serif; padding: 4px 8px; border-radius: 6px; pointer-events: none; }
+      #pickStatus.hudBadge { min-width: 90px; text-align: center; }
+      #pickName.hudBadge { max-width: 320px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    </style>
+    <div id="pickHud">
+      <div id="pickStatus" class="hudBadge">Picking: On</div>
+      <div id="pickName" class="hudBadge">(none)</div>
+    </div>
+    <!-- Build badge (bottom-right) -->
+    <style>
+      #buildBadge { position: fixed; right: 10px; bottom: 10px; z-index: 200; background: rgba(0,0,0,0.5); color: #ddd; font: 12px/1.2 sans-serif; padding: 4px 8px; border-radius: 6px; pointer-events: none; }
+    </style>
+    <div id="buildBadge">Starting…</div>
+    <div id="ui-hover-zone"></div>
+    <div id="ui-container">
+        <h3>Controls</h3>
+        <div class="ui-section ui-flex-row">
+          <label for="pinPanelCheckbox" style="margin:0;">Pin Panel</label>
+          <input type="checkbox" id="pinPanelCheckbox" checked>
+        </div>
+        <!-- Removed legacy Picture Frame/TV controls -->
+        <div class="ui-section" id="surfacePicker">
+          <label>Surface Picker</label>
+          <div id="selectedSurfaceName" style="margin:4px 0; opacity:0.8;">Selected: none</div>
+          <div class="ui-flex-row" style="gap:6px;">
+            <button id="togglePickingBtn">Picking: On</button>
+            <button id="openProjectionEditorBtn">Projection Editor</button>
+          </div>
+        </div>
+        <div class="ui-section">
+          <button id="resetViewBtn">Reset View</button>
+        </div>
+        <div class="ui-section">
+          <label>Model Auswahl</label>
+          <select id="modelSelect">
+            <option value="models/room.glb">room.glb</option>
+            <option value="models/city.glb">city.glb</option>
+          </select>
+          <button id="loadModelBtn" style="margin-top:5px;">Load Model</button>
+        </div>
+        <div class="ui-section">
+          <label for="importModelInput">Import GLB</label>
+          <input type="file" id="importModelInput" accept="model/gltf-binary,.glb" />
+        </div>
+        <!-- Removed Generator from menu -->
+        <div class="ui-section ui-flex-row">
+          <label for="transparentBgCheckbox">Transparent BG</label>
+          <input type="checkbox" id="transparentBgCheckbox">
+        </div>
+        <div class="ui-section ui-flex-row">
+          <label for="autoRestoreWebcams">Auto Restore Webcams</label>
+          <input type="checkbox" id="autoRestoreWebcams">
+        </div>
+        <div class="ui-section">
+          <label>Audio Reactivity</label>
+          <div class="ui-flex-row" style="gap:6px; align-items: center;">
+            <select id="audioSourceSelect">
+              <option value="tv">TV Stream</option>
+              <option value="system">System Audio</option>
+              <option value="mic">Mikrofon</option>
+            </select>
+            <button id="toggleAudioBtn">Start Audio</button>
+          </div>
+          <div id="audioStatus" style="margin-top:6px; opacity:0.8;">Status: idle</div>
+        </div>
+        <div class="ui-section">
+          <button id="toggleDevToolsBtn">DevTools</button>
+        </div>
+        <div class="ui-section window-controls">
+          <button id="minimizeBtn">-</button>
+          <button id="maximizeBtn">[]</button>
+          <button id="closeBtn">X</button>
+        </div>
+      </div>
+    </div>
+    <!-- Right-side Projection Editor Panel -->
+    <style>
+      #projectionPanel {
+        position: fixed;
+        top: 10px;
+        right: -320px; /* hidden offscreen */
+        background: rgba(0,0,0,0.75);
+        color: white;
+        font-family: sans-serif;
+        font-size: 14px;
+        border-radius: 8px;
+        padding: 10px;
+        width: 280px;
+        z-index: 100;
+        transition: right 0.25s ease-in-out;
+      }
+      #projectionPanel.open { right: 10px; }
+    </style>
+    <div id="projectionPanel">
+      <h3 style="margin:0 0 10px 0; padding:0; text-align:center; border-bottom:1px solid #555; padding-bottom:5px;">Projection Editor</h3>
+      <div class="ui-section">
+        <label>Configured Projections</label>
+        <div class="ui-flex-row" style="gap:6px; align-items:center;">
+          <select id="projectionsSelect" style="flex:1; width:100%"></select>
+          <button id="activateProjectionBtn" title="Activate selection">Use</button>
+        </div>
+      </div>
+      <div class="ui-section">
+        <label>Projection Name</label>
+        <input type="text" id="projName" placeholder="My Projection" style="width:100%" />
+      </div>
+      <div class="ui-section">
+        <label>Surface Name</label>
+        <input type="text" id="surfaceAlias" placeholder="Wall A" style="width:100%" />
+      </div>
+      <div class="ui-section">
+        <label>Surface Select</label>
+        <select id="surfaceSelect" style="width:100%"></select>
+      </div>
+      <div class="ui-section">
+        <label>Source</label>
+        <select id="sourceType" style="width:100%">
+          <option value="none">None</option>
+          <option value="image">Image</option>
+          <option value="webcam">Webcam</option>
+        </select>
+        <input type="file" id="sourceImageInput" accept="image/*" style="display:none; margin-top:6px; width:100%" />
+        <select id="sourceCameraSelect" style="display:none; margin-top:6px; width:100%"></select>
+        <div class="ui-flex-row" id="webcamButtons" style="display:none; margin-top:6px;">
+          <button id="startProjWebcamBtn">Start</button>
+          <button id="stopProjWebcamBtn" style="display:none;">Stop</button>
+        </div>
+      </div>
+      <div class="ui-section">
+        <label>Adjustments</label>
+        <div class="ui-flex-row"><span>Zoom</span><input type="range" id="selZoom" min="0.1" max="3" step="0.05" value="1"></div>
+        <div class="ui-flex-row"><span>Offset X</span><input type="range" id="selOffsetX" min="-1" max="1" step="0.01" value="0"></div>
+        <div class="ui-flex-row"><span>Offset Y</span><input type="range" id="selOffsetY" min="-1" max="1" step="0.01" value="0"></div>
+        <label for="selFit" style="margin-top: 5px;">Fit Mode</label>
+        <select id="selFit"><option value="cover">Cover</option><option value="contain">Contain</option><option value="stretch">Stretch</option></select>
+        <button id="selReset" style="margin-top:5px; width:100%">Reset</button>
+      </div>
+      <div class="ui-section ui-flex-row">
+        <button id="saveProjectionBtn">Save</button>
+        <button id="closeProjectionBtn">Close</button>
+      </div>
+    </div>
+    <div id="loader"></div>
+    <div id="container"></div>
+    <!-- Import maps polyfill -->
+    <!-- Remove this when import maps will be widely supported -->
+    <script async src="./js/es-module-shims.js"></script>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "./js/threejs/three.module.js",
+          "three/addons/": "./js/threejs/jsm/"
+        }
+      }
+    </script>
+    <script type="text/javascript">
+      //Global variables
+      var fps = 24;
+      var camera,
+        scene,
+        renderer,
+        gltfScene,
+        THREE,
+        musicLight,
+        soundbarMaterial,
+        musicLightIntensity = 50 / 1,
+        cameraContainer,
+        isSignalNotFound,
+        isDebugging = true,
+        orbitalControl;
+
+      let currentWebcamStream = null;
+      let currentTvStream = null;
+      let canvasTexturePhoto; // Make this global to revert to it
+
+      //Using two separate canvas to simplify code
+      let canvasArtist = document.createElement("canvas");
+      let canvasClock = document.createElement("canvas");
+      let canvasPhoto = document.createElement("canvas");
+      canvasArtist.width = 640;
+      canvasArtist.height = 360;
+      canvasPhoto.width = 360;
+      canvasPhoto.height = 640;
+      canvasClock.width = canvasClock.height = 300;
+    </script>
+    <script type="module">
+      import * as THREE_MODULE from "three";
+      window.THREE = THREE_MODULE;
+      const THREE = window.THREE;
+
+      import Stats from "three/addons/libs/stats.module.js";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+      import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
+      import { EffectComposer } from "three/addons/postprocessing/EffectComposer.js";
+      import { RenderPass } from "three/addons/postprocessing/RenderPass.js";
+      // GLTFExporter is optional; we will lazy-load it on demand
+      import { UnrealBloomPass } from "three/addons/postprocessing/UnrealBloomPass.js";
+      import { FilmPass } from "three/addons/postprocessing/FilmPass.js";
+
+      // Expose GLTFLoader to non-module code paths (e.g., import handler)
+      window.GLTFLoaderRef = GLTFLoader;
+
+      let composer;
+      let canvasTextureArtist, canvasTextureClock;
+      let htmlVideoScreenObject;
+      let htmlVideo = document.createElement("video");
+      htmlVideo.src = `textures/no_signal.webm`;
+      htmlVideo.muted = true;
+      htmlVideo.loop = true;
+      htmlVideo.play();
+
+      // Create a reusable video material for the "no signal" overlay object
+      let videoTexture = null;
+      let videoMaterial = null;
+      try {
+        videoTexture = new THREE.VideoTexture(htmlVideo);
+        videoTexture.format = THREE.RGBAFormat;
+        videoTexture.minFilter = THREE.NearestFilter;
+        videoTexture.maxFilter = THREE.NearestFilter;
+        videoTexture.generateMipmaps = false;
+        videoTexture.flipY = false;
+        videoMaterial = new THREE.MeshBasicMaterial({ map: videoTexture, transparent: false });
+      } catch (e) { console.warn('Video texture init failed:', e); }
+
+      const frustumSize = 20,
+        resizeWidth = false;
+
+      let houseGroup = null;
+      let raycaster, mouse, hoveredMesh = null, hoverEdges = null, hoverOverlay = null, selectedSurface = null;
+      let pickingEnabled = true;
+      // Expose pick state to non-module scripts
+      try {
+        window.getPickingEnabled = () => pickingEnabled;
+        window.setPickingEnabled = (v) => { pickingEnabled = !!v; };
+      } catch {}
+
+      // On-screen picking status
+      function updatePickStatus(extra) {
+        try {
+          const el = document.getElementById('pickStatus'); if (!el) return;
+          const state = pickingEnabled ? 'On' : 'Off';
+          el.textContent = extra ? `Picking: ${state} • ${extra}` : `Picking: ${state}`;
+          const nameEl = document.getElementById('pickName');
+          if (nameEl) nameEl.textContent = extra ? (String(extra).split(' • ')[0] || '(mesh)') : '(none)';
+        } catch {}
+      }
+      // Expose selectedSurface for non-module scripts
+      try { Object.defineProperty(window, 'selectedSurface', { get(){return selectedSurface;}, set(v){selectedSurface=v;} }); } catch {}
+      const surfaceOriginalMaterials = new Map();
+      const surfaceStreams = new Map(); // uuid -> MediaStream
+      let currentModelPath = 'models/room.glb';
+      try { window.currentModelPath = currentModelPath; } catch {}
+      let profile = { models: {} };
+      let saveProfileDebounce = null;
+      function debounceSaveProfile() {
+        clearTimeout(saveProfileDebounce);
+        saveProfileDebounce = setTimeout(async () => {
+          try { await window.electronAPI?.saveConfig?.(profile); } catch {}
+        }, 300);
+      }
+      function init() {
+        const container = document.getElementById("container");
+        renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+        renderer.setPixelRatio(window.devicePixelRatio);
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+        renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        renderer.outputEncoding = THREE.sRGBEncoding;
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        container.appendChild(renderer.domElement);
+
+        // Raycaster for surface picking
+        raycaster = new THREE.Raycaster();
+        mouse = new THREE.Vector2();
+
+        composer = new EffectComposer(renderer);
+        window.addEventListener("resize", onWindowResize);
+
+        let aspect = window.innerWidth / window.innerHeight;
+        camera = new THREE.OrthographicCamera(
+          (-aspect * frustumSize) / 2,
+          (aspect * frustumSize) / 2,
+          frustumSize / 2,
+          -frustumSize / 2,
+          0.25,
+          1000
+        );
+        camera.zoom = 1.25;
+        camera.updateProjectionMatrix();
+        cameraContainer = new THREE.Object3D();
+        cameraContainer.add(camera);
+        cameraContainer.rotation.x = (Math.PI / 180) * -30;
+        cameraContainer.rotation.y = (Math.PI / 180) * 30;
+
+        orbitalControl = new OrbitControls(camera, container);
+        orbitalControl.enableDamping = true;
+        orbitalControl.minDistance = 18;
+        orbitalControl.maxDistance = 50;
+        orbitalControl.target.set(0, 0, -0.1);
+        orbitalControl.enabled = isDebugging;
+        orbitalControl.update();
+        orbitalControl.saveState();
+
+        scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x101010);
+        
+        const ambientLight = new THREE.AmbientLight( 0xffffff, 1 );
+        scene.add( ambientLight );
+
+        musicLight = new THREE.PointLight(0x2d2d2d, musicLightIntensity, 5);
+        musicLight.position.set(0, 1.25, -3.75);
+        scene.add(musicLight);
+
+        let roomLight = new THREE.PointLight(0xcecca7, 4, 8);
+        roomLight.position.set(-3.5, 2, 1.5);
+        scene.add(roomLight);
+
+        const shadowLight = new THREE.SpotLight(0xffffff, 0.1);
+        shadowLight.position.set(0, 75, 0);
+        shadowLight.castShadow = true;
+        scene.add(shadowLight);
+
+        soundbarMaterial = new THREE.MeshStandardMaterial();
+        soundbarMaterial.color = new THREE.Color(0x2d2d2d);
+
+        // Bottom shadow plane created once
+        const planeGeometry = new THREE.PlaneGeometry(25, 25);
+        const bottomPlane = new THREE.Mesh(
+          planeGeometry,
+          new THREE.ShadowMaterial({})
+        );
+        bottomPlane.receiveShadow = true;
+        bottomPlane.position.set(0, -2.5, 0);
+        bottomPlane.rotation.x = (Math.PI / 180) * -90;
+        scene.add(bottomPlane);
+
+        // Shared canvas textures/materials
+        canvasTextureArtist = new THREE.CanvasTexture(canvasArtist);
+        canvasTextureArtist.encoding = THREE.sRGBEncoding;
+        canvasTextureArtist.flipY = false;
+        const canvasMaterialArtist = new THREE.MeshBasicMaterial({ map: canvasTextureArtist, transparent: false });
+        window.canvasMaterialArtist = canvasMaterialArtist; // Store for later use
+
+        window.canvasTexturePhoto = new THREE.CanvasTexture(canvasPhoto);
+        window.canvasTexturePhoto.encoding = THREE.sRGBEncoding;
+        window.canvasTexturePhoto.flipY = false;
+        window.canvasTexturePhoto.wrapS = THREE.RepeatWrapping;
+        window.canvasTexturePhoto.wrapT = THREE.RepeatWrapping;
+        window.canvasTexturePhoto.rotation = (Math.PI / 180) * -90;
+
+        const canvasMaterialPhoto = new THREE.MeshBasicMaterial({ map: window.canvasTexturePhoto, transparent: false });
+        canvasMaterialPhoto.map.offset.set(-0.003, 0);
+
+        canvasTextureClock = new THREE.CanvasTexture(canvasClock);
+        canvasTextureClock.flipY = false;
+        canvasTextureClock.anisotropy = 4;
+        const canvasMaterialClock = new THREE.MeshBasicMaterial({ map: canvasTextureClock, transparent: false });
+
+        function applyBindings(root) {
+          const screenArtist = root.getObjectByName('TV_SCREEN');
+          const screenClock = root.getObjectByName('CLOCK_SCREEN');
+          const screenPhoto = root.getObjectByName('PICTURE_FRAME');
+
+          if (screenArtist) screenArtist.material = canvasMaterialArtist;
+          if (screenClock) screenClock.material = canvasMaterialClock;
+          if (screenPhoto) screenPhoto.material = canvasMaterialPhoto;
+
+          // If the loaded model doesn't include our named surfaces, create simple stand-ins
+          function ensurePlane(name, width, height, material, position, rotationY = 0) {
+            let obj = root.getObjectByName(name);
+            if (!obj) {
+              const geo = new THREE.PlaneGeometry(width, height);
+              const mesh = new THREE.Mesh(geo, material.clone());
+              mesh.name = name;
+              mesh.position.copy(position);
+              mesh.rotation.y = rotationY;
+              root.add(mesh);
+              return mesh;
+            }
+            return obj;
+          }
+
+          const defaultY = 1.5;
+          const photo = ensurePlane('PICTURE_FRAME', 0.8, 1.2, canvasMaterialPhoto, new THREE.Vector3(0, defaultY, -2.0), 0);
+          const tv = ensurePlane('TV_SCREEN', 1.6, 0.9, canvasMaterialArtist, new THREE.Vector3(2.0, 1.4, 0), -Math.PI / 2);
+
+          if (screenArtist && videoMaterial) {
+            // Recreate no-signal overlay for new TV screen
+            if (htmlVideoScreenObject) scene.remove(htmlVideoScreenObject);
+            const tvSrc = screenArtist || tv;
+            htmlVideoScreenObject = tvSrc.clone(false);
+            tvSrc.getWorldPosition(htmlVideoScreenObject.position);
+            tvSrc.getWorldQuaternion(htmlVideoScreenObject.quaternion);
+            htmlVideoScreenObject.position.set(
+              htmlVideoScreenObject.position.x,
+              htmlVideoScreenObject.position.y,
+              htmlVideoScreenObject.position.z + 0.002
+            );
+            htmlVideoScreenObject.material = videoMaterial;
+            scene.add(htmlVideoScreenObject);
+          }
+        }
+
+        function frameToObject(obj) {
+          try {
+            const box = new THREE.Box3().setFromObject(obj);
+            if (!box.isEmpty()) {
+              const size = new THREE.Vector3();
+              const center = new THREE.Vector3();
+              box.getSize(size);
+              box.getCenter(center);
+              // Place object so its bottom sits at y = -2.5 (floor height)
+              const bottomY = center.y - size.y / 2;
+              obj.position.y += (-2.5 - bottomY);
+
+              // Adjust camera target to object center at visible height
+              if (window.orbitalControl) {
+                window.orbitalControl.target.copy(new THREE.Vector3(center.x, -2.5 + Math.min(size.y, 3) * 0.5, center.z));
+              }
+
+              // Fit orthographic zoom to bounding sphere
+              const radius = Math.max(size.x, size.y, size.z) / 2;
+              const aspect = window.innerWidth / window.innerHeight;
+              const margin = 1.2; // 20% padding
+              const fitHeight = (frustumSize / (2 * radius * margin));
+              const fitWidth = ((aspect * frustumSize) / (2 * radius * margin));
+              const zoom = Math.min(fitHeight, fitWidth);
+              if (window.camera) {
+                window.camera.zoom = Math.max(0.2, Math.min(5, zoom));
+                window.camera.updateProjectionMatrix();
+              }
+              window.orbitalControl?.update();
+            }
+          } catch (e) {
+            console.warn('frameToObject failed:', e);
+          }
+        }
+
+        function loadModel(modelPath) {
+          window.electronAPI?.log?.('info', 'Load model start', modelPath);
+          const loader = new GLTFLoader();
+          loader.load(modelPath, (gltf) => {
+            if (gltfScene) scene.remove(gltfScene);
+            gltfScene = gltf.scene;
+            gltfScene.position.set(0, -2.5, 0);
+            applyBindings(gltf.scene);
+            scene.add(gltf.scene);
+            currentModelPath = modelPath; try { window.currentModelPath = currentModelPath; } catch {}
+            loadProfileForCurrentModel();
+            try {
+              frameToObject(gltf.scene);
+              const childCount = gltf.scene.children?.length || 0;
+              window.electronAPI?.log?.('info', 'Load model success', modelPath, 'children:', childCount);
+            } catch {}
+            showScene();
+            try { populateSurfaceDropdown(); } catch {}
+
+            try {
+              (function logSceneStats(root){
+                let meshCount=0, triTotal=0, vertTotal=0;
+                root.traverse((obj)=>{
+                  if (obj.isMesh && obj.geometry) {
+                    const pos = obj.geometry.attributes?.position; const idxA = obj.geometry.index?.array;
+                    const tris = idxA ? Math.floor(idxA.length/3) : (pos ? Math.floor(pos.count/3) : 0);
+                    const verts = pos ? pos.count : 0;
+                    try { window.electronAPI?.log?.('info','mesh.stats',obj.name||'(mesh)','tris',tris,'verts',verts,obj.geometry.type||'BufferGeometry'); } catch {}
+                    meshCount++; triTotal += tris; vertTotal += verts;
+                  }
+                });
+                try { window.electronAPI?.log?.('info','scene.stats','meshes',meshCount,'tris',triTotal,'verts',vertTotal); } catch {}
+              })(gltf.scene);
+            } catch {}
+          }, undefined, (err) => {
+            console.error('Failed to load model', modelPath, err);
+            window.electronAPI?.log?.('error', 'Load model error', modelPath, String(err));
+            // Fallback to models/room.glb if any model fails to load
+            if (!modelPath.endsWith('models/room.glb')) {
+              console.warn('Falling back to models/room.glb');
+              window.electronAPI?.log?.('warn', 'Fallback to models/room.glb');
+              loader.load('models/room.glb', (gltf) => {
+                if (gltfScene) scene.remove(gltfScene);
+                gltfScene = gltf.scene;
+                gltfScene.position.set(0, -2.5, 0);
+                applyBindings(gltf.scene);
+                scene.add(gltf.scene);
+                frameToObject(gltf.scene);
+                showScene();
+            try { populateSurfaceDropdown(); } catch {}
+
+              }, undefined, (err2) => {
+                console.error('Fallback load failed', err2);
+                alert('Failed to load model: ' + modelPath);
+              });
+            } else {
+              alert('Failed to load model: ' + modelPath);
+            }
+          });
+        }
+
+        // Expose for non-module UI script
+        window.loadModelRef = loadModel;
+
+        // Load default model (room.glb)
+        loadModel('models/room.glb');
+
+        const renderPass = new RenderPass(scene, camera);
+        composer.addPass(renderPass);
+        // Watchdog: ensure loader hides even if model load callbacks delay
+        setTimeout(() => { try { showScene();
+            try { populateSurfaceDropdown(); } catch {}
+ } catch {} }, 3000);
+      }
+
+      function meshBasicToStandardMesh(object) {
+        let oldMat = object.material;
+        let newMat = new THREE.MeshStandardMaterial();
+        newMat.map = oldMat.map;
+        object.material = newMat;
+      }
+
+      function onWindowResize() {
+        let aspect = window.innerWidth / window.innerHeight;
+        camera.left = (-aspect * frustumSize) / 2;
+        camera.right = (aspect * frustumSize) / 2;
+        camera.top = frustumSize / 2;
+        camera.bottom = -frustumSize / 2;
+        camera.updateProjectionMatrix();
+        renderer.setSize(window.innerWidth, window.innerHeight);
+      }
+
+      function render() {
+        setTimeout(() => requestAnimationFrame(render), 1000 / fps);
+        orbitalControl.update();
+        if (canvasTextureArtist) canvasTextureArtist.needsUpdate = true;
+        if (canvasTextureClock) canvasTextureClock.needsUpdate = true;
+        if (window.canvasTexturePhoto) window.canvasTexturePhoto.needsUpdate = true;
+
+        if (htmlVideoScreenObject) {
+          const tvActive = !!window.tvWebcamActive;
+          if (!tvActive && isSignalNotFound) {
+            htmlVideo.play();
+            htmlVideoScreenObject.visible = true;
+          } else {
+            htmlVideo.pause();
+            htmlVideoScreenObject.visible = false;
+          }
+        }
+        composer.render();
+      }
+
+      function computeSurfaceNormal(mesh) {
+        // Use bounding box: the thinnest axis indicates the normal
+        const box = new THREE.Box3().setFromObject(mesh);
+        const size = new THREE.Vector3();
+        box.getSize(size);
+        const dims = [size.x, size.y, size.z];
+        let minIdx = 0; let minVal = dims[0];
+        for (let i=1;i<3;i++){ if (dims[i] < minVal) { minVal = dims[i]; minIdx = i; } }
+        // Get world axes from object's matrix
+        const m = mesh.matrixWorld;
+        const worldX = new THREE.Vector3(m.elements[0], m.elements[1], m.elements[2]).normalize();
+        const worldY = new THREE.Vector3(m.elements[4], m.elements[5], m.elements[6]).normalize();
+        const worldZ = new THREE.Vector3(m.elements[8], m.elements[9], m.elements[10]).normalize();
+        const axis = [worldX, worldY, worldZ][minIdx].clone();
+        // Choose direction pointing toward camera if possible
+        const camDir = new THREE.Vector3().subVectors(camera.position, box.getCenter(new THREE.Vector3())).normalize();
+        if (axis.dot(camDir) < 0) axis.multiplyScalar(-1);
+        return axis;
+      }
+
+      function flyToSurface(mesh) {
+        if (!mesh) return;
+        const box = new THREE.Box3().setFromObject(mesh);
+        const center = new THREE.Vector3(); box.getCenter(center);
+        const size = new THREE.Vector3(); box.getSize(size);
+        const normal = computeSurfaceNormal(mesh);
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const distance = maxDim * 2.5;
+        const target = center;
+        const pos = new THREE.Vector3().copy(normal).multiplyScalar(distance).add(target);
+        camera.position.copy(pos);
+        orbitalControl.target.copy(target);
+        // Fit orthographic zoom
+        const aspect = window.innerWidth / window.innerHeight;
+        const margin = 1.2;
+        const fitH = frustumSize / (size.y * margin);
+        const fitW = (aspect * frustumSize) / (size.x * margin);
+        camera.zoom = Math.max(0.2, Math.min(5, Math.min(fitH, fitW)));
+        camera.updateProjectionMatrix();
+        orbitalControl.update();
+      }
+
+      init();
+      render();
+
+      function showScene() {
+        document.getElementById("loader").style.visibility = "collapse";
+        document.getElementById("container").classList.toggle("fadeIn");
+      }
+    </script>
+    <script>
+      // Populate build badge with version info
+      window.addEventListener('DOMContentLoaded', async () => {
+        try {
+          const info = await window.electronAPI?.getVersion?.();
+          const badge = document.getElementById('buildBadge');
+          if (badge) {
+            const parts = [];
+            if (info?.appVersion) parts.push(`v${info.appVersion}`);
+            if (info?.electron) parts.push(`Electron ${info.electron}`);
+            if (info?.customProtocol !== undefined) parts.push(info.customProtocol ? 'proto:on' : 'proto:off');
+            badge.textContent = parts.join(' • ');
+          }
+          try { window.electronAPI?.log?.('info', 'renderer.start', info); } catch {}
+        } catch {}
+      });
+      // Delegated click handlers for left Controls panel (robust binding)
+      window.addEventListener('DOMContentLoaded', () => {
+        const panel = document.getElementById('ui-container');
+        if (!panel) return;
+        try { window.electronAPI?.log?.('info', 'ui.handlers.ready'); } catch {}
+        panel.addEventListener('click', (ev) => {
+          const t = ev.target;
+          if (!t || t.tagName !== 'BUTTON') return;
+          const id = t.id || '';
+          try { window.electronAPI?.log?.('info', 'ui.click', id, (t.textContent||'').trim()); } catch {}
+          switch (id) {
+            case 'openProjectionEditorBtn':
+              try {
+                if (typeof openProjectionPanel === 'function') openProjectionPanel();
+                else { const p = document.getElementById('projectionPanel'); if (p) p.classList.add('open'); }
+              } catch {
+                const p = document.getElementById('projectionPanel'); if (p) p.classList.add('open');
+              }
+              break;
+            case 'togglePickingBtn':
+              try {
+                const get = window.getPickingEnabled; const set = window.setPickingEnabled;
+                if (typeof get === 'function' && typeof set === 'function') {
+                  const next = !get(); set(next);
+                  t.textContent = `Picking: ${next ? 'On' : 'Off'}`;
+                  try { window.electronAPI?.log?.('info', 'picker.state', next ? 'On' : 'Off'); } catch {}
+                  if (!next && typeof setHover === 'function') setHover(null);
+                  updatePickStatus();
+                }
+              } catch {}
+              break;
+            case 'resetViewBtn':
+              try {
+                if (window.cameraContainer && window.camera && window.orbitalControl) {
+                  window.orbitalControl.enabled = false;
+                  window.cameraContainer.rotation.x = (Math.PI / 180) * -30;
+                  window.cameraContainer.rotation.y = (Math.PI / 180) * 30;
+                  window.camera.position.set(0, 0, 0);
+                  window.camera.rotation.set(0, 0, 0);
+                  window.camera.zoom = 1.25;
+                  window.camera.updateProjectionMatrix();
+                  window.orbitalControl.target.set(0, 0, -0.1);
+                  window.orbitalControl.enabled = true;
+                  window.orbitalControl.update();
+                }
+              } catch {}
+              break;
+            case 'loadModelBtn':
+              try {
+                const sel = document.getElementById('modelSelect');
+                const path = sel && sel.value;
+                if (path && window.loadModelRef) window.loadModelRef(path);
+              } catch {}
+              break;
+            case 'toggleDevToolsBtn':
+              try { window.electronAPI?.send('toggle-devtools'); } catch {}
+              break;
+            case 'minimizeBtn':
+              try { window.electronAPI?.send('minimize-window'); } catch {}
+              break;
+            case 'maximizeBtn':
+              try { window.electronAPI?.send('maximize-window'); } catch {}
+              break;
+            case 'closeBtn':
+              try { window.electronAPI?.send('close-window'); } catch {}
+              break;
+          }
+        }, true);
+
+        // Optional self-test: simulate a couple of actions and log outcomes
+        try {
+          if (window.electronAPI?.isSelfTest?.()) {
+            setTimeout(() => {
+              try { window.electronAPI?.log?.('info', 'selftest.begin'); } catch {}
+              // Try projection editor open
+              try { if (typeof openProjectionPanel === 'function') openProjectionPanel(); window.electronAPI?.log?.('info', 'selftest.openProjectionEditor', 'ok'); } catch (e) { window.electronAPI?.log?.('error', 'selftest.openProjectionEditor', String(e)); }
+              // Toggle picking
+              try { if (typeof pickingEnabled !== 'undefined') { pickingEnabled = !pickingEnabled; window.electronAPI?.log?.('info', 'selftest.togglePicking', String(pickingEnabled)); } } catch (e) { window.electronAPI?.log?.('error', 'selftest.togglePicking', String(e)); }
+              // Load model again
+              try { const sel = document.getElementById('modelSelect'); const path = sel && sel.value; if (path && window.loadModelRef) { window.loadModelRef(path); window.electronAPI?.log?.('info', 'selftest.loadModel', path); } } catch (e) { window.electronAPI?.log?.('error', 'selftest.loadModel', String(e)); }
+              try { window.electronAPI?.log?.('info', 'selftest.end'); } catch {}
+            }, 500);
+          }
+        } catch {}
+      });
+      // Keep the UI panel always open; disable hover behavior entirely
+      window.addEventListener('DOMContentLoaded', () => {
+        const panel = document.getElementById('ui-container');
+        const pin = document.getElementById('pinPanelCheckbox');
+        if (!panel) return;
+        panel.classList.add('open');
+        if (pin) pin.addEventListener('change', () => { if (pin.checked) panel.classList.add('open'); });
+        // Keyboard toggle: M toggles the panel visibility
+        window.addEventListener('keydown', (e) => {
+          if (e.code === 'KeyM') {
+            if (panel.classList.contains('open')) panel.classList.remove('open'); else panel.classList.add('open');
+          }
+        });
+      });
+
+        // Safe element refs to avoid ReferenceError at top-level
+        const startProjWebcamBtn = document.getElementById("startProjWebcamBtn");
+        const stopProjWebcamBtn = document.getElementById("stopProjWebcamBtn");
+        const sourceCameraSelect = document.getElementById("sourceCameraSelect");
+        const projectionsList = document.getElementById("projectionsList");
+        const assignImageInput = document.getElementById('assignImageInput');
+        const surfaceCameraSelect = document.getElementById('surfaceCameraSelect');
+        const startSurfaceWebcamBtn = document.getElementById('startSurfaceWebcamBtn');
+        const stopSurfaceWebcamBtn = document.getElementById('stopSurfaceWebcamBtn');
+        const cameraSelect = document.getElementById('cameraSelect');
+        const pictureFrameInput = document.getElementById('pictureFrameInput');
+        const tvCameraSelect = document.getElementById('tvCameraSelect');
+        const startWebcamBtn = document.getElementById('startWebcamBtn');
+        const stopWebcamBtn = document.getElementById('stopWebcamBtn');
+        if (startProjWebcamBtn) startProjWebcamBtn.addEventListener('click', async () => {
+          if (!selectedSurface) return; const id = sourceCameraSelect.value; if (!id) return;
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: id } } });
+            const v = document.createElement('video'); v.srcObject = stream; v.muted = true; v.playsInline = true; v.play();
+            const tex = new THREE.VideoTexture(v); tex.encoding = THREE.sRGBEncoding;
+            ensureOriginalMaterial(selectedSurface); selectedSurface.material = new THREE.MeshBasicMaterial({ map: tex }); selectedSurface.material.needsUpdate = true;
+            surfaceStreams.set(selectedSurface.uuid, stream);
+            applySelectedSurfaceTransform();
+            startProjWebcamBtn.style.display = 'none'; stopProjWebcamBtn.style.display = 'block';
+          } catch (e) { console.error(e); }
+        });
+
+        if (stopProjWebcamBtn) stopProjWebcamBtn.addEventListener('click', () => {
+          const s = surfaceStreams.get(selectedSurface?.uuid); if (s) { s.getTracks().forEach(t=>t.stop()); surfaceStreams.delete(selectedSurface.uuid); }
+          startProjWebcamBtn.style.display = 'block'; stopProjWebcamBtn.style.display = 'none';
+        });
+
+        function addOrUpdateProjectionList() {
+          if (!projectionsList) return;
+          projectionsList.innerHTML = '';
+          const model = ensureModelProfile();
+          const projections = model.projections || {};
+          Object.entries(projections).forEach(([id, p]) => {
+            const row = document.createElement('div'); row.style.display='flex'; row.style.justifyContent='space-between'; row.style.alignItems='center'; row.style.marginBottom='4px';
+            const name = document.createElement('span'); name.textContent = p.name || id; name.style.flex='1';
+            const btn = document.createElement('button'); btn.textContent = 'Activate'; btn.onclick = () => activateProjection(id);
+            row.appendChild(name); row.appendChild(btn); projectionsList.appendChild(row);
+          });
+        }
+
+        function activateProjection(id) {
+          const model = ensureModelProfile(); const p = model.projections?.[id]; if (!p) return;
+          const mesh = findSurfaceByKey(p.surfaceKey); if (!mesh) { alert('Surface nicht gefunden.'); return; }
+          selectedSurface = mesh; selectedSurfaceName.textContent = 'Selected: ' + (mesh.name || mesh.uuid);
+          setSelectedTransformUI(p.transform); applySelectedSurfaceTransform();
+          // Apply source
+          if (p.source?.type === 'image' && p.source.path) {
+            new THREE.TextureLoader().load(p.source.path, (tex)=>{ tex.encoding=THREE.sRGBEncoding; ensureOriginalMaterial(mesh); mesh.material=new THREE.MeshBasicMaterial({ map: tex }); mesh.material.needsUpdate=true; applySelectedSurfaceTransform(); });
+          } else if (p.source?.type === 'webcam' && p.source.deviceId) {
+            const auto = document.getElementById('autoRestoreWebcams');
+            if (auto?.checked) startProjWebcamBtn.click();
+          }
+          flyToSurface(mesh);
+        }
+
+        function saveProjection() {
+          if (!selectedSurface) { alert('Bitte zuerst eine Fläche auswählen.'); return; }
+          const id = (projName.value || 'Projection') + '-' + Math.random().toString(36).slice(2,7);
+          const key = getSurfaceKey(selectedSurface);
+          const source = (()=>{
+            const t = sourceType.value;
+            if (t==='image') return { type:'image', path: selectedSurface.material?.map?.image?.currentSrc || selectedSurface.material?.map?.image?.src || null };
+            if (t==='webcam') return { type:'webcam', deviceId: sourceCameraSelect.value };
+            return { type:'none' };
+          })();
+          const entry = { name: projName.value || 'Projection', surfaceKey: key, surfaceName: surfaceAlias.value || selectedSurface.name || '', source, transform: getSelectedTransform() };
+          const model = ensureModelProfile(); if (!model.projections) model.projections = {};
+          model.projections[id] = entry; debounceSaveProfile(); addOrUpdateProjectionList(); refreshProjectionsDropdown();
+          closeProjectionPanel();
+        }
+        saveProjectionBtn.addEventListener('click', saveProjection);
+
+        const surfaceSelect = document.getElementById("surfaceSelect");
+        function populateSurfaceDropdown(){ try {
+          if (!surfaceSelect) return;
+          while (surfaceSelect.firstChild) surfaceSelect.removeChild(surfaceSelect.firstChild);
+          const names = new Set();
+          (window.gltfScene||scene).traverse(obj=>{ if (obj.isMesh && obj.name) names.add(obj.name); });
+          Array.from(names).sort((a,b)=>a.localeCompare(b)).forEach(n=>{ const opt=document.createElement("option"); opt.value=n; opt.textContent=n; surfaceSelect.appendChild(opt); });
+        } catch(e){ try{ window.electronAPI?.log?.("error","surface.dropdown", String(e)); }catch{} } }
+        if (surfaceSelect) surfaceSelect.addEventListener("change", ()=>{
+          const name = surfaceSelect.value;
+          let found=null; (window.gltfScene||scene).traverse(obj=>{ if (!found && obj.isMesh && obj.name===name) found=obj; });
+          if (found) { selectedSurface = found; try { window.selectedSurface = selectedSurface; } catch {}
+            const selectedSurfaceName = document.getElementById("selectedSurfaceName"); if (selectedSurfaceName) selectedSurfaceName.textContent = "Selected: " + (found.name||found.uuid);
+            const surfaceAlias = document.getElementById("surfaceAlias"); if (surfaceAlias) surfaceAlias.value = found.name||"";
+          }
+        });
+        importModelInput.addEventListener('change', async (e) => {
+          const file = e.target.files && e.target.files[0];
+          if (!file) return;
+          if (!file.name.toLowerCase().endsWith('.glb')) {
+            alert('Bitte eine .glb Datei wählen.');
+            return;
+          }
+          try {
+            const arrayBuffer = await file.arrayBuffer();
+            const GLTFL = window.GLTFLoaderRef;
+            if (!GLTFL) {
+              window.electronAPI?.log?.('error', 'GLTFLoader not available in renderer');
+              alert('GLTFLoader nicht verfügbar. Bitte neu starten.');
+              return;
+            }
+            const loader = new GLTFL();
+            loader.parse(arrayBuffer, '', (gltf) => {
+              window.electronAPI?.log?.('info', 'Import GLB parse success', file.name);
+              if (gltfScene) scene.remove(gltfScene);
+              gltfScene = gltf.scene;
+              gltfScene.position.set(0, -2.5, 0);
+              applyBindings(gltf.scene);
+              scene.add(gltf.scene);
+              frameToObject(gltf.scene);
+              showScene();
+            try { populateSurfaceDropdown(); } catch {}
+
+
+              // Save a copy under models/<filename>
+              try {
+                if (window.electronAPI && window.electronAPI.saveFile) {
+                  const bytes = new Uint8Array(arrayBuffer);
+                  const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+                  const rel = 'models/' + safeName;
+                  window.electronAPI.saveFile(rel, Array.from(bytes));
+                  window.electronAPI?.log?.('info', 'Saved imported model', rel, bytes.length + ' bytes');
+                  // Add to dropdown for quick access
+                  // Refresh dropdown from disk
+                  populateModelsDropdown().then(() => {
+                    modelSelect.value = rel;
+                  });
+                  currentModelPath = rel; try { window.currentModelPath = currentModelPath; } catch {}
+                  loadProfileForCurrentModel();
+                }
+              } catch (saveErr) {
+                console.warn('Could not save imported model:', saveErr);
+                window.electronAPI?.log?.('warn', 'Save imported model failed', String(saveErr));
+              }
+            }, (err) => {
+              console.error('GLB parse failed:', err);
+              window.electronAPI?.log?.('error', 'Import GLB parse failed', file.name, String(err));
+              alert('Konnte GLB nicht laden. Siehe Konsole.');
+            });
+          } catch (err) {
+            console.error('Import error:', err);
+            window.electronAPI?.log?.('error', 'Import error', String(err));
+            alert('Fehler beim Einlesen der Datei.');
+          } finally {
+            // reset input, so the same file can be selected again later
+            e.target.value = '';
+          }
+        });
+
+        function clearCurrentModel() {
+          if (gltfScene) {
+            scene.remove(gltfScene);
+            gltfScene = null;
+          }
+          if (houseGroup) {
+            scene.remove(houseGroup);
+            houseGroup = null;
+          }
+        }
+
+        function makeWall(length, height, thickness) {
+          const geo = new THREE.BoxGeometry(length, height, thickness);
+          const mat = new THREE.MeshStandardMaterial({ color: 0xbdbdbd, roughness: 0.9 });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.receiveShadow = true;
+          return mesh;
+        }
+
+        function makeFloor(width, depth) {
+          const geo = new THREE.BoxGeometry(width, 0.1, depth);
+          const mat = new THREE.MeshStandardMaterial({ color: 0x8d6e63, roughness: 1.0 });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.receiveShadow = true;
+          return mesh;
+        }
+
+        function makePicturePlane(width, height, name = 'PICTURE_FRAME') {
+          const geo = new THREE.PlaneGeometry(width, height);
+          const mat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.name = name;
+          return mesh;
+        }
+
+        function makeScreenPlane(width, height, name = 'TV_SCREEN') {
+          const geo = new THREE.PlaneGeometry(width, height);
+          const mat = new THREE.MeshBasicMaterial({ color: 0x222222 });
+          const mesh = new THREE.Mesh(geo, mat);
+          mesh.name = name;
+          return mesh;
+        }
+
+        function buildHouse() {
+          const width = 12, depth = 8, height = 3, t = 0.2;
+          const root = new THREE.Object3D();
+          root.name = 'HouseRoot';
+
+          const floor = makeFloor(width, depth);
+          floor.position.set(0, -0.05, 0);
+          floor.name = 'Floor';
+          root.add(floor);
+
+          const southWallLeft = makeWall(width / 2 - 1, height, t);
+          southWallLeft.position.set(-((width / 4) + 0.5), height / 2, depth / 2);
+          root.add(southWallLeft);
+
+          const southWallRight = makeWall(width / 2 - 1, height, t);
+          southWallRight.position.set(((width / 4) + 0.5), height / 2, depth / 2);
+          root.add(southWallRight);
+
+          const northWall = makeWall(width, height, t);
+          northWall.position.set(0, height / 2, -depth / 2);
+          root.add(northWall);
+
+          const westWall = makeWall(t, height, depth);
+          westWall.position.set(-width / 2, height / 2, 0);
+          root.add(westWall);
+
+          const eastWall = makeWall(t, height, depth);
+          eastWall.position.set(width / 2, height / 2, 0);
+          root.add(eastWall);
+
+          const innerWallLeft = makeWall(t, height, depth / 2 - 1);
+          innerWallLeft.position.set(0, height / 2, -(depth / 4 + 0.5));
+          root.add(innerWallLeft);
+
+          const innerWallRight = makeWall(t, height, depth / 2 - 1);
+          innerWallRight.position.set(0, height / 2, (depth / 4 + 0.5));
+          root.add(innerWallRight);
+
+          const pic = makePicturePlane(0.8, 1.2, 'PICTURE_FRAME');
+          pic.rotation.y = Math.PI / 2;
+          pic.position.set(-width / 2 + 0.101, 1.6, -depth / 4);
+          root.add(pic);
+
+          const tv = makeScreenPlane(1.6, 0.9, 'TV_SCREEN');
+          tv.rotation.y = -Math.PI / 2;
+          tv.position.set(width / 2 - 0.101, 1.5, depth / 4);
+          root.add(tv);
+
+          const pic2 = makePicturePlane(0.8, 1.2, 'PICTURE_02');
+          pic2.rotation.y = Math.PI;
+          pic2.position.set(-1.5, 1.6, -depth / 2 + 0.101);
+          root.add(pic2);
+
+          const screen2 = makeScreenPlane(1.2, 0.7, 'SCREEN_02');
+          screen2.position.set(1.5, 1.4, -depth / 2 + 0.101);
+          root.add(screen2);
+
+          const group = new THREE.Object3D();
+          group.name = 'House';
+          group.add(root);
+          return group;
+        }
+
+        // generateHouseBtn removed; no-op
+
+        async function populateCameraList() {
+          if (!navigator.mediaDevices?.enumerateDevices) {
+            console.log("enumerateDevices() not supported.");
+            return;
+          }
+          try {
+            const devices = await navigator.mediaDevices.enumerateDevices();
+            const videoDevices = devices.filter(device => device.kind === 'videoinput');
+            
+            if (cameraSelect) cameraSelect.innerHTML = '';
+            if (tvCameraSelect) tvCameraSelect.innerHTML = '';
+            if (surfaceCameraSelect) surfaceCameraSelect.innerHTML = '';
+            const sourceCameraSelect = document.getElementById('sourceCameraSelect');
+            if (sourceCameraSelect) sourceCameraSelect.innerHTML = '';
+            videoDevices.forEach((device, index) => {
+              const option = document.createElement('option');
+              option.value = device.deviceId;
+              option.text = device.label || `Camera ${index + 1}`;
+              cameraSelect?.appendChild(option.cloneNode(true));
+              tvCameraSelect?.appendChild(option.cloneNode(true));
+              surfaceCameraSelect?.appendChild(option.cloneNode(true));
+              sourceCameraSelect?.appendChild(option);
+            });
+
+            // Ensure a selection exists and optionally auto-start TV webcam after devices are populated
+            if (tvCameraSelect && tvCameraSelect.options.length > 0 && !tvCameraSelect.value) {
+              tvCameraSelect.selectedIndex = 0;
+            }
+            if (tvCameraSelect && tvCameraSelect.options.length > 0 && !window.currentTvStream && window.autoStartTv !== false) {
+              // Start after a tick to allow UI to settle
+              setTimeout(() => startTvWebcamBtn.click(), 0);
+            }
+          } catch (err) {
+            console.error('Error populating camera list:', err);
+          }
+        }
+
+        // --- Planar region picking helpers ---
+        function ensureGeometryIndex(geometry) {
+          if (geometry.index) return geometry.index.array;
+          const pos = geometry.attributes?.position;
+          if (!pos) return null;
+          const count = pos.count;
+          const idx = new (count > 65535 ? Uint32Array : Uint16Array)(count);
+          for (let i = 0; i < count; i++) idx[i] = i;
+          geometry.setIndex(new THREE.BufferAttribute(idx, 1));
+          return geometry.index.array;
+        }
+
+        function buildTriangleAdjacency(geometry) {
+          if (!geometry) return null;
+          if (geometry.userData && geometry.userData.triAdj) return geometry.userData.triAdj;
+          const index = ensureGeometryIndex(geometry);
+          const adj = [];
+          if (!index) return null;
+          const triCount = Math.floor(index.length / 3);
+          for (let i = 0; i < triCount; i++) adj[i] = [];
+          const edgeMap = new Map(); // key -> [triangles]
+          const keyFor = (a, b) => a < b ? (a + '_' + b) : (b + '_' + a);
+          for (let t = 0; t < triCount; t++) {
+            const i0 = index[3 * t + 0], i1 = index[3 * t + 1], i2 = index[3 * t + 2];
+            const edges = [keyFor(i0, i1), keyFor(i1, i2), keyFor(i2, i0)];
+            for (const k of edges) {
+              if (!edgeMap.has(k)) edgeMap.set(k, []);
+              edgeMap.get(k).push(t);
+            }
+          }
+          edgeMap.forEach((tris) => {
+            if (tris.length === 2) {
+              const [a, b] = tris;
+              adj[a].push(b);
+              adj[b].push(a);
+            }
+          });
+          geometry.userData.triAdj = adj;
+          return adj;
+        }
+
+        function triVerticesWorld(mesh, triIndex, out) {
+          const g = mesh.geometry;
+          const index = g.index?.array || ensureGeometryIndex(g);
+          const pos = g.attributes?.position;
+          if (!pos || !index) return null;
+          const i0 = index[3 * triIndex + 0], i1 = index[3 * triIndex + 1], i2 = index[3 * triIndex + 2];
+          const v0 = new THREE.Vector3().fromBufferAttribute(pos, i0).applyMatrix4(mesh.matrixWorld);
+          const v1 = new THREE.Vector3().fromBufferAttribute(pos, i1).applyMatrix4(mesh.matrixWorld);
+          const v2 = new THREE.Vector3().fromBufferAttribute(pos, i2).applyMatrix4(mesh.matrixWorld);
+          if (out) { out[0].copy(v0); out[1].copy(v1); out[2].copy(v2); return out; }
+          return [v0, v1, v2];
+        }
+
+        function triNormalWorld(mesh, triIndex, vTemp) {
+          const vs = triVerticesWorld(mesh, triIndex, vTemp);
+          if (!vs) return null;
+          const n = new THREE.Vector3();
+          n.subVectors(vs[1], vs[0]).cross(new THREE.Vector3().subVectors(vs[2], vs[0])).normalize();
+          return n;
+        }
+
+        function planeFromTri(mesh, triIndex) {
+          const vs = triVerticesWorld(mesh, triIndex);
+          if (!vs) return null;
+          const plane = new THREE.Plane().setFromCoplanarPoints(vs[0], vs[1], vs[2]);
+          return plane;
+        }
+
+        function regionGrowPlanar(mesh, startTri, angleThresholdDeg = 7, distEpsFactor = 0.005, maxTris = 5000) {
+          const adj = buildTriangleAdjacency(mesh.geometry);
+          if (!adj) return null;
+          const plane = planeFromTri(mesh, startTri);
+          if (!plane) return null;
+          const bbox = new THREE.Box3().setFromObject(mesh);
+          const diag = bbox.getSize(new THREE.Vector3()).length() || 1;
+          const distEps = diag * distEpsFactor;
+          const cosThresh = Math.cos((angleThresholdDeg * Math.PI) / 180.0);
+          const visited = new Uint8Array(adj.length);
+          const outSet = new Set();
+          const q = [startTri];
+          const vTemp = [new THREE.Vector3(), new THREE.Vector3(), new THREE.Vector3()];
+          const startN = triNormalWorld(mesh, startTri, vTemp);
+          while (q.length && outSet.size < maxTris) {
+            const t = q.pop();
+            if (visited[t]) continue;
+            visited[t] = 1;
+            // coplanarity test
+            const vs = triVerticesWorld(mesh, t, vTemp);
+            if (!vs) continue;
+            const n = triNormalWorld(mesh, t, vTemp);
+            if (!n) continue;
+            const angleOk = Math.abs(n.dot(startN)) >= cosThresh;
+            const d0 = Math.abs(plane.distanceToPoint(vs[0]));
+            const d1 = Math.abs(plane.distanceToPoint(vs[1]));
+            const d2 = Math.abs(plane.distanceToPoint(vs[2]));
+            const distOk = (d0 < distEps && d1 < distEps && d2 < distEps);
+            if (!angleOk || !distOk) continue;
+            outSet.add(t);
+            for (const nb of adj[t]) if (!visited[nb]) q.push(nb);
+          }
+          return { plane, tris: outSet };
+        }
+
+        function buildRegionOutlineLines(mesh, region) {
+          const g = mesh.geometry;
+          const index = g.index?.array || ensureGeometryIndex(g);
+          if (!index || !region?.tris?.size) return null;
+          const inRegion = region.tris;
+          // count boundary edges
+          const edgeCount = new Map();
+          const inc = (a,b) => {
+            const key = a < b ? (a+'_'+b) : (b+'_'+a);
+            edgeCount.set(key, (edgeCount.get(key)||0)+1);
+          };
+          inRegion.forEach((t) => {
+            const a = index[3*t+0], b = index[3*t+1], c = index[3*t+2];
+            inc(a,b); inc(b,c); inc(c,a);
+          });
+          const pos = g.attributes?.position;
+          const pts = [];
+          edgeCount.forEach((cnt, key) => {
+            if (cnt === 1) { // boundary edge
+              const [sa, sb] = key.split('_');
+              const ia = parseInt(sa,10), ib = parseInt(sb,10);
+              const va = new THREE.Vector3().fromBufferAttribute(pos, ia).applyMatrix4(mesh.matrixWorld);
+              const vb = new THREE.Vector3().fromBufferAttribute(pos, ib).applyMatrix4(mesh.matrixWorld);
+              pts.push(va.x, va.y, va.z, vb.x, vb.y, vb.z);
+            }
+          });
+          if (pts.length < 6) return null;
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(pts), 3));
+          const mat = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 2 });
+          const lines = new THREE.LineSegments(geo, mat);
+          return lines;
+        }
+
+        function buildRegionOverlayMesh(mesh, region) {
+          const g = mesh.geometry;
+          const index = g.index?.array || ensureGeometryIndex(g);
+          const pos = g.attributes?.position;
+          if (!index || !pos || !region?.tris?.size) return null;
+          const verts = [];
+          region.tris.forEach((t) => {
+            const i0 = index[3*t+0], i1 = index[3*t+1], i2 = index[3*t+2];
+            const v0 = new THREE.Vector3().fromBufferAttribute(pos, i0).applyMatrix4(mesh.matrixWorld);
+            const v1 = new THREE.Vector3().fromBufferAttribute(pos, i1).applyMatrix4(mesh.matrixWorld);
+            const v2 = new THREE.Vector3().fromBufferAttribute(pos, i2).applyMatrix4(mesh.matrixWorld);
+            verts.push(v0.x, v0.y, v0.z, v1.x, v1.y, v1.z, v2.x, v2.y, v2.z);
+          });
+          if (!verts.length) return null;
+          const geo = new THREE.BufferGeometry();
+          geo.setAttribute('position', new THREE.Float32BufferAttribute(new Float32Array(verts), 3));
+          const mat = new THREE.MeshBasicMaterial({ color: 0x00ffff, transparent: true, opacity: 0.25, depthTest: false, depthWrite: false, side: THREE.DoubleSide });
+          const meshOverlay = new THREE.Mesh(geo, mat);
+          meshOverlay.renderOrder = 9999;
+          return meshOverlay;
+        }
+        function setHover(mesh) {
+          if (hoveredMesh === mesh) return;
+          if (hoverEdges) { scene.remove(hoverEdges); hoverEdges.geometry.dispose(); hoverEdges.material.dispose(); hoverEdges = null; }
+          hoveredMesh = mesh;
+          if (hoveredMesh && hoveredMesh.geometry) {
+            try {
+              const edges = new THREE.EdgesGeometry(hoveredMesh.geometry, 30);
+              const mat = new THREE.LineBasicMaterial({ color: 0x00ffff, linewidth: 2 });
+              hoverEdges = new THREE.LineSegments(edges, mat);
+              hoverEdges.position.copy(hoveredMesh.position);
+              hoverEdges.quaternion.copy(hoveredMesh.quaternion);
+              hoverEdges.scale.copy(hoveredMesh.scale);
+              scene.add(hoverEdges);
+            } catch {}
+          }
+        }
+
+        let lastRegionTriCount = 0;
+        function onMouseMove(e) {
+          if (!pickingEnabled) { setHover(null); return; }
+          if (!renderer?.domElement) return;
+          const rect = renderer.domElement.getBoundingClientRect();
+          mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+          mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+          raycaster.setFromCamera(mouse, camera);
+          const intersects = raycaster.intersectObjects(scene.children, true);
+          let mesh = null;
+          let region = null;
+          if (intersects.length) {
+            const hit = intersects.find(h => h.object && h.object.isMesh && Number.isInteger(h.faceIndex));
+            const target = hit || intersects.find(h => h.object && h.object.isMesh);
+            if (target && target.object) {
+              mesh = target.object;
+              if (Number.isInteger(target.faceIndex)) {
+                try {
+                  region = regionGrowPlanar(mesh, target.faceIndex);
+                  const size = region?.tris?.size || 0;
+                  try { window.electronAPI?.log?.('info', 'picker.region', mesh.name||'(no-name)', size+' tris'); } catch {}
+                } catch (e) {
+                  try { window.electronAPI?.log?.('error', 'picker.region.error', String(e)); } catch {}
+                }
+              }
+            }
+          }
+          // draw region outline when available; otherwise fall back to whole-mesh outline
+          if (mesh) {
+            // clear previous helpers
+            if (hoverEdges) { scene.remove(hoverEdges); hoverEdges.geometry?.dispose?.(); hoverEdges.material?.dispose?.(); hoverEdges = null; }
+            if (hoverOverlay) { scene.remove(hoverOverlay); hoverOverlay.geometry?.dispose?.(); hoverOverlay.material?.dispose?.(); hoverOverlay = null; }
+            if (region && region.tris && region.tris.size > 0) {
+              // prefer filled overlay for visibility
+              const overlay = buildRegionOverlayMesh(mesh, region);
+              if (overlay) { hoverOverlay = overlay; scene.add(hoverOverlay); hoveredMesh = mesh; lastRegionTriCount = region.tris.size; updatePickStatus(`${mesh.name||'(mesh)'} • ${lastRegionTriCount} tris`); return; }
+              const lines = buildRegionOutlineLines(mesh, region);
+              if (lines) { hoverEdges = lines; scene.add(hoverEdges); hoveredMesh = mesh; lastRegionTriCount = region.tris.size; updatePickStatus(`${mesh.name||'(mesh)'} • ${lastRegionTriCount} tris`); return; }
+            }
+            updatePickStatus(mesh.name||'(mesh)');
+          }
+          setHover(mesh);
+        }
+
+        function onClick() {
+          if (!pickingEnabled) return;
+          if (hoveredMesh) {
+            selectedSurface = hoveredMesh;
+            selectedSurfaceName.textContent = 'Selected: ' + (selectedSurface.name || selectedSurface.uuid);
+            loadSelectedSurfaceControls();
+            // Optionally auto-open editor for a smooth flow
+            // openProjectionPanel();
+          }
+        }
+
+        if (renderer && renderer.domElement) {
+          renderer.domElement.addEventListener('mousemove', onMouseMove);
+          renderer.domElement.addEventListener('click', onClick);
+        } else {
+          try { window.electronAPI?.log?.('warn', 'renderer.domElement not ready'); } catch {}
+        }
+
+        function onContextMenu(e) {
+          e.preventDefault();
+          if (!pickingEnabled) return;
+          if (hoveredMesh) {
+            selectedSurface = hoveredMesh;
+            selectedSurfaceName.textContent = 'Selected: ' + (selectedSurface.name || selectedSurface.uuid);
+            loadSelectedSurfaceControls();
+            openProjectionPanel();
+          }
+        }
+        if (renderer && renderer.domElement) {
+          renderer.domElement.addEventListener('contextmenu', onContextMenu);
+        }
+
+        function ensureOriginalMaterial(mesh) {
+          if (!surfaceOriginalMaterials.has(mesh.uuid)) {
+            surfaceOriginalMaterials.set(mesh.uuid, mesh.material);
+          }
+        }
+
+        // legacy assign buttons removed from UI
+
+        if (assignImageInput) assignImageInput.addEventListener('change', async (e) => {
+          const file = e.target.files && e.target.files[0];
+          if (!file) return;
+          try {
+            // Persist image under assets/images
+            const bytes = new Uint8Array(await file.arrayBuffer());
+            const safeName = file.name.replace(/[^a-zA-Z0-9_.-]/g, '_');
+            const rel = 'assets/images/' + Date.now() + '_' + safeName;
+            if (window.electronAPI?.saveFile) window.electronAPI.saveFile(rel, Array.from(bytes));
+            const url = rel; // served via custom protocol
+            const texLoader = new THREE.TextureLoader();
+            texLoader.load(url, (tex) => {
+              tex.encoding = THREE.sRGBEncoding;
+              ensureOriginalMaterial(selectedSurface);
+              selectedSurface.material = new THREE.MeshBasicMaterial({ map: tex });
+              selectedSurface.material.needsUpdate = true;
+              saveSurfaceProfile({ type: 'image', path: rel });
+              applySelectedSurfaceTransform();
+            }, undefined, (err) => console.error('Texture load failed', err));
+          } catch (err) {
+            console.error('Assign image failed:', err);
+          }
+          e.target.value = '';
+        });
+
+        if (startSurfaceWebcamBtn) startSurfaceWebcamBtn.addEventListener('click', async () => {
+          if (!selectedSurface) { alert('Bitte zuerst eine Fläche auswählen.'); return; }
+          const id = surfaceCameraSelect.value;
+          if (!id) { alert('Keine Kamera ausgewählt.'); return; }
+          try {
+            const constraints = { video: { deviceId: { exact: id } } };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            const video = document.createElement('video');
+            video.srcObject = stream; video.muted = true; video.playsInline = true; video.play();
+            const vtex = new THREE.VideoTexture(video);
+            vtex.encoding = THREE.sRGBEncoding; vtex.needsUpdate = true;
+            ensureOriginalMaterial(selectedSurface);
+            selectedSurface.material = new THREE.MeshBasicMaterial({ map: vtex });
+            selectedSurface.material.needsUpdate = true;
+            const prev = surfaceStreams.get(selectedSurface.uuid);
+            if (prev) prev.getTracks().forEach(t => t.stop());
+            surfaceStreams.set(selectedSurface.uuid, stream);
+            saveSurfaceProfile({ type: 'webcam', deviceId: id });
+            applySelectedSurfaceTransform();
+            startSurfaceWebcamBtn.style.display = 'none';
+            stopSurfaceWebcamBtn.style.display = 'block';
+          } catch (err) {
+            console.error('Surface webcam failed:', err);
+            alert('Kamera konnte nicht gestartet werden.');
+          }
+        });
+
+        if (stopSurfaceWebcamBtn) stopSurfaceWebcamBtn.addEventListener('click', () => {
+          if (!selectedSurface) return;
+          const s = surfaceStreams.get(selectedSurface.uuid);
+          if (s) { s.getTracks().forEach(t => t.stop()); surfaceStreams.delete(selectedSurface.uuid); }
+          startSurfaceWebcamBtn.style.display = 'block';
+          stopSurfaceWebcamBtn.style.display = 'none';
+          saveSurfaceProfile(null); // clear
+        });
+
+        // Clear button removed from UI; handled via Projection Editor
+
+        function getSurfaceKey(mesh) {
+          if (!mesh) return null;
+          if (mesh.name) return 'name:' + mesh.name;
+          const box = new THREE.Box3().setFromObject(mesh);
+          const c = new THREE.Vector3(); box.getCenter(c);
+          return 'pos:' + c.x.toFixed(2) + ',' + c.y.toFixed(2) + ',' + c.z.toFixed(2);
+        }
+
+        function ensureModelProfile() {
+          const keyPath = (typeof currentModelPath !== 'undefined') ? currentModelPath : (window.currentModelPath || 'models/room.glb');
+          if (!profile || typeof profile !== 'object') profile = { models: {} };
+          if (!profile.models) profile.models = {};
+          if (!profile.models[keyPath]) profile.models[keyPath] = { surfaces: {}, projections: {} };
+          return profile.models[keyPath];
+        }
+
+        function saveSurfaceProfile(source) {
+          if (!selectedSurface) return;
+          const key = getSurfaceKey(selectedSurface);
+          const model = ensureModelProfile();
+          if (source === null) {
+            delete model.surfaces[key];
+          } else {
+            const t = getSelectedTransform();
+            model.surfaces[key] = { source, transform: t };
+          }
+          debounceSaveProfile();
+        }
+
+        function getSelectedTransform() {
+          return {
+            zoom: parseFloat(surfaceControls.zoom.value),
+            offsetX: parseFloat(surfaceControls.ox.value),
+            offsetY: parseFloat(surfaceControls.oy.value),
+            fit: surfaceControls.fit.value
+          };
+        }
+
+        function setSelectedTransformUI(t) {
+          surfaceControls.zoom.value = t?.zoom ?? 1;
+          surfaceControls.ox.value = t?.offsetX ?? 0;
+          surfaceControls.oy.value = t?.offsetY ?? 0;
+          surfaceControls.fit.value = t?.fit ?? 'cover';
+        }
+
+        function loadSelectedSurfaceControls() {
+          if (!selectedSurface) { setSelectedTransformUI(); return; }
+          const model = ensureModelProfile();
+          const key = getSurfaceKey(selectedSurface);
+          const entry = model.surfaces[key];
+          setSelectedTransformUI(entry?.transform);
+          applySelectedSurfaceTransform();
+        }
+
+        function applySelectedSurfaceTransform() {
+          if (!selectedSurface || !selectedSurface.material || !selectedSurface.material.map) return;
+          const texture = selectedSurface.material.map;
+          const t = getSelectedTransform();
+          // Determine target aspect from surface bounds
+          const box = new THREE.Box3().setFromObject(selectedSurface);
+          const size = new THREE.Vector3(); box.getSize(size);
+          const dims = [Math.abs(size.x), Math.abs(size.y), Math.abs(size.z)].sort((a,b)=>a-b);
+          const targetAspect = dims[2] / dims[1];
+
+          let sourceAspect = 1;
+          if (texture.image) {
+            if (texture.image.videoWidth) sourceAspect = texture.image.videoWidth / texture.image.videoHeight;
+            else if (texture.image.width) sourceAspect = texture.image.width / texture.image.height;
+          }
+          let repeatX = 1, repeatY = 1;
+          if (t.fit === 'stretch') {}
+          else if (t.fit === 'contain') {
+            if (sourceAspect > targetAspect) repeatY = sourceAspect / targetAspect; else repeatX = targetAspect / sourceAspect;
+          } else { // cover
+            if (sourceAspect > targetAspect) repeatX = targetAspect / sourceAspect; else repeatY = sourceAspect / targetAspect;
+          }
+          const zoom = t.zoom || 1;
+          texture.wrapS = THREE.RepeatWrapping; texture.wrapT = THREE.RepeatWrapping;
+          texture.repeat.set((1 / zoom) * repeatX, (1 / zoom) * repeatY);
+          const centeredOffsetX = (1 - (1 / zoom) * repeatX) / 2;
+          const centeredOffsetY = (1 - (1 / zoom) * repeatY) / 2;
+          texture.offset.set(centeredOffsetX + (t.offsetX || 0), centeredOffsetY + (t.offsetY || 0));
+          texture.needsUpdate = true;
+          // persist transform if a source is set
+          const key = getSurfaceKey(selectedSurface);
+          const model = ensureModelProfile();
+          if (model.surfaces[key]) { model.surfaces[key].transform = t; debounceSaveProfile(); }
+        }
+
+        const surfaceControls = { zoom: document.getElementById('selZoom'), ox: document.getElementById('selOffsetX'), oy: document.getElementById('selOffsetY'), fit: document.getElementById('selFit'), reset: document.getElementById('selReset') };
+        surfaceControls.zoom?.addEventListener('input', applySelectedSurfaceTransform);
+        surfaceControls.ox?.addEventListener('input', applySelectedSurfaceTransform);
+        surfaceControls.oy?.addEventListener('input', applySelectedSurfaceTransform);
+        surfaceControls.fit?.addEventListener('input', applySelectedSurfaceTransform);
+        surfaceControls.reset?.addEventListener('click', () => { setSelectedTransformUI(); applySelectedSurfaceTransform(); saveSurfaceProfile(model?.surfaces[getSurfaceKey(selectedSurface)]?.source || null); });
+
+        async function loadProfileForCurrentModel() {
+          try { profile = await window.electronAPI?.loadConfig?.() || profile; } catch {}
+          ensureModelProfile();
+          const keyPath = (typeof currentModelPath !== 'undefined') ? currentModelPath : (window.currentModelPath || 'models/room.glb');
+          const model = profile.models[keyPath];
+          if (!model) return;
+          const surfaces = model.surfaces || {};
+          for (const [key, conf] of Object.entries(surfaces)) {
+            const mesh = findSurfaceByKey(key);
+            if (!mesh) continue;
+            if (conf.source?.type === 'image' && conf.source.path) {
+              const loader = new THREE.TextureLoader();
+              loader.load(conf.source.path, (tex) => {
+                tex.encoding = THREE.sRGBEncoding;
+                ensureOriginalMaterial(mesh);
+                mesh.material = new THREE.MeshBasicMaterial({ map: tex });
+                mesh.material.needsUpdate = true;
+                // apply transform
+                if (conf.transform) {
+                  const prevSel = selectedSurface; selectedSurface = mesh; setSelectedTransformUI(conf.transform); applySelectedSurfaceTransform(); selectedSurface = prevSel;
+                }
+              });
+            } else if (conf.source?.type === 'webcam' && conf.source.deviceId) {
+              // Respect user opt-in to auto-restore webcams
+              const auto = document.getElementById('autoRestoreWebcams');
+              if (!auto?.checked) { continue; }
+              try {
+                const stream = await promiseWithTimeout(
+                  navigator.mediaDevices.getUserMedia({ video: { deviceId: { exact: conf.source.deviceId } } }),
+                  3000
+                );
+                const video = document.createElement('video');
+                video.srcObject = stream; video.muted = true; video.playsInline = true; video.play();
+                const vtex = new THREE.VideoTexture(video);
+                vtex.encoding = THREE.sRGBEncoding;
+                ensureOriginalMaterial(mesh);
+                mesh.material = new THREE.MeshBasicMaterial({ map: vtex });
+                mesh.material.needsUpdate = true;
+                surfaceStreams.set(mesh.uuid, stream);
+                if (conf.transform) { const prevSel = selectedSurface; selectedSurface = mesh; setSelectedTransformUI(conf.transform); applySelectedSurfaceTransform(); selectedSurface = prevSel; }
+              } catch (e) { console.warn('Auto webcam start failed:', e); }
+            }
+          }
+          addOrUpdateProjectionList();
+        }
+
+        function promiseWithTimeout(p, ms) {
+          let to;
+          return Promise.race([
+            p.finally(() => clearTimeout(to)),
+            new Promise((_, rej) => { to = setTimeout(() => rej(new Error('timeout')), ms); })
+          ]);
+        }
+
+        function findSurfaceByKey(key) {
+          if (!gltfScene) return null;
+          if (key.startsWith('name:')) {
+            const name = key.slice(5);
+            return gltfScene.getObjectByName(name);
+          } else if (key.startsWith('pos:')) {
+            const parts = key.slice(4).split(',').map(parseFloat);
+            const target = new THREE.Vector3(parts[0], parts[1], parts[2]);
+            let best = null, bestDist = Infinity;
+            gltfScene.traverse(obj => {
+              if (obj.isMesh) {
+                const box = new THREE.Box3().setFromObject(obj); const c = new THREE.Vector3(); box.getCenter(c);
+                const d = c.distanceTo(target);
+                if (d < bestDist && d < 0.25) { best = obj; bestDist = d; }
+              }
+            });
+            return best;
+          }
+          return null;
+        }
+
+        function stopCurrentWebcam() {
+          if (window.currentWebcamStream) {
+            window.currentWebcamStream.getTracks().forEach(track => track.stop());
+            window.currentWebcamStream = null;
+          }
+          if (window.gltfScene && window.canvasTexturePhoto) {
+            const pictureFrame = window.gltfScene.getObjectByName("PICTURE_FRAME");
+            if (pictureFrame) {
+              pictureFrame.material.map = window.canvasTexturePhoto;
+              pictureFrame.material.needsUpdate = true;
+            }
+          }
+          pictureFrameControls.style.display = 'block'; // Show controls for static image
+          startWebcamBtn?.style && (startWebcamBtn.style.display = 'block');
+          stopWebcamBtn?.style && (stopWebcamBtn.style.display = 'none');
+          if (cameraSelect) cameraSelect.disabled = false;
+          if (pictureFrameInput) pictureFrameInput.disabled = false;
+        }
+        
+        function stopCurrentTvWebcam() {
+            if (window.currentTvStream) {
+                window.currentTvStream.getTracks().forEach(track => track.stop());
+                window.currentTvStream = null;
+            }
+            window.tvWebcamActive = false;
+            if (window.gltfScene && window.canvasMaterialArtist) {
+                const tvScreen = window.gltfScene.getObjectByName("TV_SCREEN");
+                if (tvScreen) {
+                    tvScreen.material = window.canvasMaterialArtist;
+                    tvScreen.material.needsUpdate = true;
+                }
+            }
+            tvControls.style.display = 'none';
+            startTvWebcamBtn.style.display = 'block';
+            stopTvWebcamBtn.style.display = 'none';
+            tvCameraSelect.disabled = false;
+        }
+
+        if (startWebcamBtn) startWebcamBtn.addEventListener('click', async () => {
+          stopCurrentWebcam();
+          const selectedDeviceId = cameraSelect.value;
+          if (!selectedDeviceId) {
+            alert('No camera selected.');
+            return;
+          }
+
+          try {
+            const constraints = { video: { deviceId: { exact: selectedDeviceId } } };
+            const stream = await navigator.mediaDevices.getUserMedia(constraints);
+            window.currentWebcamStream = stream;
+const video = document.createElement('video');
+video.srcObject = stream;
+video.muted = true;
+video.playsInline = true;
+video.play();
+
+            const webcamTexture = new THREE.VideoTexture(video);
+            webcamTexture.encoding = THREE.sRGBEncoding;
+            webcamTexture.flipY = false;
+            webcamTexture.wrapS = THREE.RepeatWrapping;
+            webcamTexture.wrapT = THREE.RepeatWrapping;
+            webcamTexture.rotation = (Math.PI / 180) * -90;
+
+            if (window.gltfScene) {
+              const pictureFrame = window.gltfScene.getObjectByName("PICTURE_FRAME");
+              if (pictureFrame) {
+                pictureFrame.material.map = webcamTexture;
+                pictureFrame.material.needsUpdate = true;
+              }
+            }
+            pictureFrameControls.style.display = 'block'; // Show controls for webcam
+            startWebcamBtn?.style && (startWebcamBtn.style.display = 'none');
+            stopWebcamBtn?.style && (stopWebcamBtn.style.display = 'block');
+            if (cameraSelect) cameraSelect.disabled = true;
+            if (pictureFrameInput) pictureFrameInput.disabled = true;
+          } catch (err) {
+            console.error('Error accessing webcam:', err);
+            alert('Could not access webcam.');
+          }
+        });
+
+        if (stopWebcamBtn) stopWebcamBtn.addEventListener('click', stopCurrentWebcam);
+
+        if (typeof startTvWebcamBtn !== 'undefined' && startTvWebcamBtn) startTvWebcamBtn.addEventListener('click', async () => {
+            stopCurrentTvWebcam();
+            const selectedDeviceId = tvCameraSelect.value;
+            if (!selectedDeviceId) {
+                alert('No camera selected for TV.');
+                return;
+            }
+
+            try {
+                const constraints = { video: { deviceId: { exact: selectedDeviceId } } };
+                const stream = await navigator.mediaDevices.getUserMedia(constraints);
+                window.currentTvStream = stream;
+                const video = document.createElement('video');
+video.srcObject = stream;
+video.muted = true;
+video.playsInline = true;
+video.play();
+
+                const webcamTexture = new THREE.VideoTexture(video);
+                webcamTexture.encoding = THREE.sRGBEncoding;
+                webcamTexture.flipY = false;
+
+                if (window.gltfScene) {
+                    const tvScreen = window.gltfScene.getObjectByName("TV_SCREEN");
+                    if (tvScreen) {
+                        tvScreen.material = new THREE.MeshBasicMaterial({ map: webcamTexture });
+                        tvScreen.material.needsUpdate = true;
+                        // Initialize repeat/offset based on current UI controls
+                        updateTvTexture();
+                    }
+                }
+                tvControls.style.display = 'block';
+                startTvWebcamBtn.style.display = 'none';
+                stopTvWebcamBtn.style.display = 'block';
+                tvCameraSelect.disabled = true;
+                window.tvWebcamActive = true;
+            } catch (err) {
+                console.error('Error accessing TV webcam:', err);
+                alert('Could not access TV webcam.');
+            }
+        });
+
+        if (typeof stopTvWebcamBtn !== 'undefined' && stopTvWebcamBtn) stopTvWebcamBtn.addEventListener('click', stopCurrentTvWebcam);
+
+        transparentBgCheckbox.addEventListener('change', (e) => {
+          if (window.scene && window.renderer) {
+            if (e.target.checked) {
+              window.scene.background = null;
+              window.renderer.setClearAlpha(0);
+            } else {
+              window.scene.background = new THREE.Color(0x101010);
+              window.renderer.setClearAlpha(1);
+            }
+          }
+        });
+
+        resetViewBtn.addEventListener('click', () => {
+          if (window.cameraContainer && window.camera && window.orbitalControl) {
+            window.orbitalControl.enabled = false;
+            window.cameraContainer.rotation.x = (Math.PI / 180) * -30;
+            window.cameraContainer.rotation.y = (Math.PI / 180) * 30;
+            window.camera.position.set(0, 0, 0);
+            window.camera.rotation.set(0, 0, 0);
+            window.camera.zoom = 1.25;
+            window.camera.updateProjectionMatrix();
+            window.orbitalControl.target.set(0, 0, -0.1);
+            window.orbitalControl.enabled = true;
+            window.orbitalControl.update();
+          }
+        });
+
+        if (pictureFrameInput) pictureFrameInput.addEventListener('change', (e) => {
+          if (e.target.files && e.target.files[0]) {
+            stopCurrentWebcam(); // Stop webcam if a file is chosen for the frame
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              if (typeof photoImg !== 'undefined') {
+                photoImg.src = event.target.result;
+                pictureFrameControls.style.display = 'block';
+              }
+            };
+            reader.readAsDataURL(e.target.files[0]);
+          }
+        });
+
+        // Guarded legacy controls for frame transforms
+        const frameZoom = document.getElementById('frameZoom');
+        const frameOffsetX = document.getElementById('frameOffsetX');
+        const frameOffsetY = document.getElementById('frameOffsetY');
+        const frameFit = document.getElementById('frameFit');
+
+        function updateFrameTexture() {
+            const pictureFrame = window.gltfScene?.getObjectByName("PICTURE_FRAME");
+            if (!pictureFrame || !pictureFrame.material.map) return;
+
+            const texture = pictureFrame.material.map;
+            const zoom = parseFloat(frameZoom?.value || 1);
+            const offsetX = parseFloat(frameOffsetX?.value || 0);
+            const offsetY = parseFloat(frameOffsetY?.value || 0);
+            const fitMode = (frameFit?.value || 'cover');
+        const selectedSurfaceName = document.getElementById('selectedSurfaceName');
+        // legacy surface controls removed from left panel
+        // legacy left-panel elements removed; declarations moved earlier as guarded lookups
+        // Per-surface transform controls: use right panel controls
+        const surfaceControls = {
+          zoom: document.getElementById('selZoom'),
+          ox: document.getElementById('selOffsetX'),
+          oy: document.getElementById('selOffsetY'),
+          fit: document.getElementById('selFit'),
+          reset: document.getElementById('selReset')
+        };
+
+            // Target aspect ratio of the picture frame plane (it's portrait)
+            const targetAspect = 3 / 4; 
+            
+            let sourceAspect = 1;
+            if (texture.image) {
+                if (texture.image.videoWidth) { // VideoTexture
+                    sourceAspect = texture.image.videoWidth / texture.image.videoHeight;
+                } else { // CanvasTexture or Texture
+                    sourceAspect = texture.image.width / texture.image.height;
+                }
+            }
+
+            let repeatX = 1, repeatY = 1;
+
+            if (fitMode === 'stretch') {
+                // Stretch to fill, ignore aspect ratio
+            } else if (fitMode === 'contain') {
+                // Fit entire image, preserving aspect (letterboxing)
+                if (sourceAspect > targetAspect) {
+                    repeatY = sourceAspect / targetAspect;
+                } else {
+                    repeatX = targetAspect / sourceAspect;
+                }
+            } else { // 'cover' is the default
+                // Fill the frame, preserving aspect (cropping)
+                if (sourceAspect > targetAspect) {
+                    repeatX = targetAspect / sourceAspect;
+                } else {
+                    repeatY = sourceAspect / targetAspect;
+                }
+            }
+            
+            texture.repeat.set((1 / zoom) * repeatX, (1 / zoom) * repeatY);
+            // Center the texture after scaling and then apply manual offset
+            const centeredOffsetX = (1 - (1 / zoom) * repeatX) / 2;
+            const centeredOffsetY = (1 - (1 / zoom) * repeatY) / 2;
+            texture.offset.set(centeredOffsetX + offsetX, centeredOffsetY + offsetY);
+        }
+
+        if (frameZoom) {
+          frameZoom.addEventListener('input', updateFrameTexture);
+          frameOffsetX.addEventListener('input', updateFrameTexture);
+          frameOffsetY.addEventListener('input', updateFrameTexture);
+          frameFit.addEventListener('input', updateFrameTexture);
+          resetFrameTransformBtn.addEventListener('click', () => {
+              if (frameZoom) frameZoom.value = 1;
+              if (frameOffsetX) frameOffsetX.value = 0;
+              if (frameOffsetY) frameOffsetY.value = 0;
+              if (frameFit) frameFit.value = 'cover';
+              updateFrameTexture();
+          });
+        }
+
+        // Guarded TV controls
+        const tvZoom = document.getElementById("tvZoom");
+        const tvOffsetX = document.getElementById("tvOffsetX");
+        const tvOffsetY = document.getElementById("tvOffsetY");
+        const tvFit = document.getElementById("tvFit");
+        function updateTvTexture() {
+            const tvScreen = window.gltfScene?.getObjectByName("TV_SCREEN");
+            if (!tvScreen || !tvScreen.material.map) return;
+
+            const texture = tvScreen.material.map;
+            const zoom = parseFloat(tvZoom?.value || 1);
+            const offsetX = parseFloat(tvOffsetX?.value || 0);
+            const offsetY = parseFloat(tvOffsetY?.value || 0);
+            const fitMode = tvFit?.value || 'cover';
+
+            // Target aspect ratio of the TV screen plane (it's landscape)
+            const targetAspect = 16 / 9; 
+            
+            let sourceAspect = 1;
+            if (texture.image && texture.image.videoHeight) { // VideoTexture
+                sourceAspect = texture.image.videoWidth / texture.image.videoHeight;
+            }
+
+            let repeatX = 1, repeatY = 1;
+
+            if (fitMode === 'stretch') {
+                // Stretch to fill, ignore aspect ratio
+            } else if (fitMode === 'contain') {
+                // Fit entire image, preserving aspect (letterboxing)
+                if (sourceAspect > targetAspect) {
+                    repeatY = sourceAspect / targetAspect;
+                } else {
+                    repeatX = targetAspect / sourceAspect;
+                }
+            } else { // 'cover' is the default
+                // Fill the frame, preserving aspect (cropping)
+                if (sourceAspect > targetAspect) {
+                    repeatX = targetAspect / sourceAspect;
+                } else {
+                    repeatY = sourceAspect / targetAspect;
+                }
+            }
+            
+            texture.repeat.set((1 / zoom) * repeatX, (1 / zoom) * repeatY);
+            // Center the texture after scaling and then apply manual offset
+            const centeredOffsetX = (1 - (1 / zoom) * repeatX) / 2;
+            const centeredOffsetY = (1 - (1 / zoom) * repeatY) / 2;
+            texture.offset.set(centeredOffsetX + offsetX, centeredOffsetY + offsetY);
+        }
+
+        if (tvZoom) {
+          tvZoom?.addEventListener('input', updateTvTexture);
+          tvOffsetX?.addEventListener('input', updateTvTexture);
+          tvOffsetY?.addEventListener('input', updateTvTexture);
+          tvFit?.addEventListener('input', updateTvTexture);
+          resetTvTransformBtn.addEventListener('click', () => {
+              if (tvZoom) tvZoom.value = 1;
+              if (tvOffsetX) tvOffsetX.value = 0;
+              if (tvOffsetY) tvOffsetY.value = 0;
+              if (tvFit) tvFit.value = 'cover';
+              updateTvTexture();
+          });
+        }
+
+        // Do not auto-start webcams; user can opt-in via controls/profile
+        window.autoStartTv = false;
+        populateCameraList();
+        if (navigator.mediaDevices) navigator.mediaDevices.ondevicechange = populateCameraList;
+        try { window.electronAPI?.log?.('info', 'UI init done'); } catch {}
+    </script>
+    <script>
+      // Audio Reactivity with selectable source and profile persistence
+      (function () {
+        let audioCtx = null, analyser = null, rafId = null, audioStream = null, sourceNode = null;
+        let cfg = {};
+
+        function getEl(id) { return document.getElementById(id); }
+        function setStatus(text) { const el = getEl('audioStatus'); if (el) el.textContent = 'Status: ' + text; }
+        function getSelectedSource() { const s = getEl('audioSourceSelect'); return s ? s.value : (cfg?.audio?.source || 'system'); }
+
+        async function startAudio(mode) {
+          try {
+            if (audioCtx) return;
+            const src = mode || getSelectedSource();
+            setStatus('starting ' + src + '...');
+            let stream = null;
+
+            if (src === 'tv') {
+              if (window.currentTvStream) {
+                stream = window.currentTvStream;
+              } else {
+                setStatus('TV stream not active');
+                return;
+              }
+            } else if (src === 'mic') {
+              if (!navigator.mediaDevices?.getUserMedia) { setStatus('getUserMedia unsupported'); return; }
+              stream = await navigator.mediaDevices.getUserMedia({
+                audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: false },
+                video: false
+              });
+            } else { // 'system'
+              if (!navigator.mediaDevices?.getDisplayMedia) { setStatus('getDisplayMedia unsupported'); return; }
+              try {
+                stream = await navigator.mediaDevices.getDisplayMedia({
+                  audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+                  video: false
+                });
+              } catch (errAudioOnly) {
+                // Fallback: some Chromium builds require video:true to capture system audio
+                try {
+                  stream = await navigator.mediaDevices.getDisplayMedia({
+                    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
+                    video: true
+                  });
+                  // If video present, we still only use audio track; stop video tracks to save resources
+                  try { stream.getVideoTracks().forEach(t => t.stop()); } catch {}
+                } catch (errWithVideo) {
+                  setStatus('system audio denied');
+                  try { window.electronAPI?.log?.('error', 'Display capture failed', String(errWithVideo)); } catch {}
+                  return;
+                }
+              }
+            }
+
+            audioStream = stream;
+            const Ctx = window.AudioContext || window.webkitAudioContext;
+            audioCtx = new Ctx();
+            sourceNode = audioCtx.createMediaStreamSource(stream);
+            analyser = audioCtx.createAnalyser();
+            analyser.fftSize = 2048;
+            analyser.smoothingTimeConstant = 0.8;
+            sourceNode.connect(analyser);
+
+            const freq = new Uint8Array(analyser.frequencyBinCount);
+            const tick = () => {
+              if (!analyser) return;
+              analyser.getByteFrequencyData(freq);
+              const len = 128;
+              const arr = new Array(len);
+              for (let i = 0; i < len; i++) arr[i] = (i < freq.length ? freq[i] : 0) / 255;
+              try { if (typeof window.livelyAudioListener === 'function') window.livelyAudioListener(arr); } catch {}
+              rafId = requestAnimationFrame(tick);
+            };
+            rafId = requestAnimationFrame(tick);
+
+            setStatus(src === 'tv' ? 'TV stream' : (src === 'mic' ? 'microphone' : 'system audio'));
+            const b = getEl('toggleAudioBtn'); if (b) b.textContent = 'Stop Audio';
+            try { window.electronAPI?.log?.('info', 'Audio react start', src); } catch {}
+          } catch (e) {
+            setStatus('error');
+            try { window.electronAPI?.log?.('error', 'Audio react error', e?.message || String(e)); } catch {}
+          }
+        }
+
+        function stopAudio() {
+          if (rafId) cancelAnimationFrame(rafId); rafId = null;
+          if (sourceNode) { try { sourceNode.disconnect(); } catch {} sourceNode = null; }
+          if (analyser) { try { analyser.disconnect(); } catch {} analyser = null; }
+          if (audioCtx) { try { audioCtx.close(); } catch {} audioCtx = null; }
+          if (audioStream && audioStream !== window.currentTvStream) {
+            try { audioStream.getTracks().forEach(t => t.stop()); } catch {}
+          }
+          audioStream = null;
+          const b = getEl('toggleAudioBtn'); if (b) b.textContent = 'Start Audio';
+          setStatus('idle');
+          try { window.electronAPI?.log?.('info', 'Audio react stop'); } catch {}
+        }
+
+        async function loadProfile() {
+          try {
+            const loaded = await window.electronAPI?.loadConfig?.();
+            cfg = loaded && typeof loaded === 'object' ? loaded : {};
+            const select = getEl('audioSourceSelect');
+            const saved = cfg?.audio?.source || 'system';
+            if (select) select.value = saved;
+          } catch {}
+        }
+
+        async function saveProfileSource(value) {
+          try {
+            cfg = cfg && typeof cfg === 'object' ? cfg : {};
+            cfg.audio = cfg.audio && typeof cfg.audio === 'object' ? cfg.audio : {};
+            cfg.audio.source = value;
+            await window.electronAPI?.saveConfig?.(cfg);
+          } catch {}
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+          loadProfile().then(() => {
+            const b = getEl('toggleAudioBtn');
+            const sel = getEl('audioSourceSelect');
+            if (b) b.addEventListener('click', () => { if (audioCtx) stopAudio(); else startAudio(); });
+            if (sel) sel.addEventListener('change', (e) => { const v = e.target.value; saveProfileSource(v); });
+          });
+        });
+
+        // Expose for debugging
+        window.__audioReact = { startAudio, stopAudio };
+      })();
+    </script>
+    <script>
+      // --- Electron Standalone Integration ---
+      if (typeof window.electronAPI !== 'undefined') {
+        window.electronAPI.onTrackInfo((trackInfo) => {
+          if (typeof livelyCurrentTrack === 'function') {
+            livelyCurrentTrack(trackInfo);
+          }
+        });
+      }
+    </script>
+  </body>
+</html>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,49 @@
+{
+  "name": "living-room-wallpaper",
+  "version": "1.0.0",
+  "description": "A standalone desktop version of the Living Room wallpaper.",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev-server": "live-server --host=127.0.0.1 --port=8081",
+    "dist": "electron-builder"
+  },
+  "build": {
+    "appId": "com.example.livingroom",
+    "productName": "Living Room Wallpaper",
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "js/**/*",
+      "models/**/*",
+      "styles/**/*",
+      "textures/**/*",
+      "fonts/**/*",
+      "NowPlayingTool/bin/Release/"
+    ],
+    "extraResources": [
+      {
+        "from": "NowPlayingTool/bin/Release",
+        "to": "NowPlayingTool"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  },
+  "author": "",
+  "license": "MIT",
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "dependencies": {
+    "live-server": "^1.2.2",
+    "three": "^0.158.0"
+  }
+}
